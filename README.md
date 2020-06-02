@@ -1,3 +1,3 @@
-This is a minimal example of a book based on R Markdown and **bookdown** (https://github.com/rstudio/bookdown). Please see the page "Get Started" at https://bookdown.org/ for how to compile this example.
+Ce document est un **grimoire magique** plein de **connaissances statistiques**.
 
-You can find the preview of this example at https://bookdown.org/yihui/bookdown-demo/
+Il vise à introduire les **modèles statistiques** et leurs **applications**, ainsi que leur **réalisation avec le logiciel R**. Il reprend et explicite les **notions de probabilités** et **statistiques** sous-jacentes de manière la plus didactique et accessible, à travers des exemples fantastiques (fées, princesses et enchantements).
