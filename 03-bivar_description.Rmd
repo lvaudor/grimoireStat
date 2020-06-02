@@ -1,0 +1,326 @@
+# Décrire le lien entre deux variables
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(gridExtra)
+library(purrr)
+library(magrittr)
+library(gganimate)
+source("scripts/utils.R")
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
+
+chateauxEtBoulots=read.table("datasets/chateauxEtBoulots.csv",header=TRUE,sep=";")
+broceliande=read.csv("datasets/broceliande.csv",sep=";", header=T)
+potions=read.csv("datasets/potions.csv",sep=";", header=T)
+```
+
+```{r draw_corr,echo=FALSE}
+draw_corr=function(n,a,b,sigma){
+    df=tibble(x=runif(n,0,100)) %>% 
+      mutate(y=a*x+b+rnorm(n,0,sigma))
+    p0=ggplot(df,aes(x=x,y=y))+
+      geom_point()+
+      geom_hline(yintercept=mean(df$y))+
+      geom_vline(xintercept=mean(df$x))+
+      ggtitle("variables brutes")
+    df=df %>% 
+      mutate(x=(x-mean(x))/sd(x),
+             y=(y-mean(y))/sd(y)) 
+    p1=ggplot(df,aes(x=x,y=y))+
+      geom_point()+
+      geom_hline(yintercept=0)+
+      geom_vline(xintercept=0)+
+      ggtitle("variables centrées réduites")+
+      #scale_x_continuous(limits = c(-2,2))+
+      #scale_y_continuous(limits = c(-2,2))+
+      xlab("Xc")+ylab("Yc")
+    df=df %>%
+      mutate(ymax=case_when(y>0~y,y<0~0),
+             ymin=case_when(y>0~0,y<0~y),
+             xmax=case_when(x>0~x,x<0~0),
+             xmin=case_when(x>0~0,x<0~x),
+             sign=case_when(sign(x)==sign(y)~"positive",
+                            sign(x)!=sign(y)~"negative")) %>% 
+      mutate(sign=factor(sign,levels=c("negative","positive")))
+    cols=c("positive"="blue","negative"="red")
+    p2=ggplot(df, aes(x=x,y=y))+
+      geom_abline(intercept=0,slope=1, col="grey",lty=2)+
+      geom_abline(intercept=0,slope=-1, color="grey",lty=2)+
+      geom_rect(aes(xmin=xmin,ymin=ymin,xmax=xmax,ymax=ymax,
+                    fill=factor(sign)),
+                color="grey",
+                alpha=0.2)+
+      geom_hline(yintercept=0)+
+      geom_vline(xintercept=0)+
+      geom_point()+
+      theme(legend.position="none")+
+      ggtitle(paste0("cor(x,y)=",round(cor(df$x,df$y),2)))+
+      #scale_x_continuous(limits = c(-2,2))+
+      #scale_y_continuous(limits = c(-2,2))+
+      xlab("Xc")+ylab("Yc")+
+      scale_fill_manual(values=cols)
+      return(list(p0=p0,p1=p1,p2=p2))
+}
+```
+
+## Lien entre deux variables quantitatives
+
+### Description graphique
+
+#### Nuage de points
+
+On s'intéresse ici au jeu de données `broceliande` et au lien entre l'âge et la hauteur des arbres.
+
+La représentation classique pour deux variables quantitatives et continues est une représentation par un **nuage de points**:
+
+```{r nuage_age_hauteur, fig.width=5, fig.height=3}
+ggplot(broceliande, aes(x=age,y=hauteur))+
+  geom_point(col="khaki2")+
+  scale_x_log10()
+```
+
+
+
+#### Droite/courbe de régression
+
+Il est possible d'ajouter une droite ou une courbe pour décrire l'allure de la relation:
+
+```{r nuage_age_hauteur_smooth, fig.width=5, fig.height=3, message=FALSE, warning=FALSE}
+ggplot(broceliande, aes(x=age,y=hauteur))+
+  geom_point(col="khaki2")+
+  geom_smooth(span=0.25,col="khaki4")+
+  scale_x_log10()
+``` 
+
+Par défaut, la courbe ajoutée par `geom_smooth()` est calculée par des méthodes **non-paramétriques**. Ici, par une [régression loess](http://perso.ens-lyon.fr/lise.vaudor/regression-loess/).
+
+Il est également possible de contraindre `geom_smooth()` à afficher une **droite de régression linéaire**:
+
+```{r nuage_age_hauteur_lm, fig.width=5, fig.height=3}
+ggplot(broceliande, aes(x=age, y=hauteur))+
+  geom_point(col="khaki2")+
+  geom_smooth(method="lm", col="khaki4")+
+  scale_x_log10()
+``` 
+
+#### Variables quantitatives à valeurs discrètes
+
+Lorsque les variables quantitatives sont à **valeurs discrètes**, et en fonction de leur distribution, il peut devenir nécessaire de "ruser" pour que la visualisation permette de se rendre compte qu'un point (x,y) correspond à $n>1$ individus.
+
+Par exemple, examinons le nombre de lutins vs le nombre de touffes de gui dans chaque arbre de notre jeu de données `brocéliande`.
+
+Si l'on se contente d'un `geom_point()`, alors voilà ce qu'on observe:
+
+```{r nuage_gui_lutins, fig.width=5, fig.height=2}
+ggplot(broceliande, aes(x=gui, y=lutins), col="orange")+
+  geom_point()
+```
+
+On n'a ici aucune idée de l'effectif réel observé pour chaque paire (x,y)...
+
+On peut remédier à ce problème à l'aide d'un `geom_jitter()`:
+
+
+```{r nuage_gui_lutins_jitter, fig.width=5, fig.height=2}
+ggplot(broceliande, aes(x=gui, y=lutins))+
+  geom_jitter(col="orange")
+```
+
+Il est également possible d'arranger le jeu de données pour donner un "poids" différent à chaque point en fonction de l'effectif:
+
+```{r nuage_gui_lutins_size, fig.width=5, fig.height=2}
+broceliande_t=broceliande %>%
+  group_by(gui,lutins) %>% 
+  summarise(n=n())
+
+ggplot(broceliande_t, aes(x=gui,y=lutins))+
+  geom_point(aes(size=n), col="orange")
+```
+
+
+### Description par le coefficient de corrélation
+
+$${Cor}(X,Y)= E\left[\frac{X-E(X)}{\sigma_X}\frac{Y-E(Y)}{\sigma_Y}\right]$$
+```{r plotcorr, echo=FALSE}
+plots=draw_corr(30,1.5,2,20)
+```
+
+<small>
+<table><col width="400"><col width="800">
+<tr><td> 
+```{r,fig.width=4,fig.height=3, echo=FALSE}
+plots$p0
+```
+</td><td>
+Ici les valeurs de $X$ et $Y$
+</td><tr><td>
+```{r,fig.width=4,fig.height=3,, echo=FALSE}
+plots$p1
+```
+</td><td>Ici les valeurs centrées réduites de $X$ et $Y$ soit en abscisse $Xc=\frac{X-E(x)}{\sigma_X}$ et en ordonnée $Yc=\frac{X-E(x)}{\sigma_X}$
+</td><tr><td>
+```{r,fig.width=4,fig.height=3,, echo=FALSE}
+plots$p2
+```
+</td><td>Le coefficient de corrélation correspond à l'espérance du produit $Xc.Yc$, soit la moyenne des "aires" (positives en bleu, négatives en rouge)
+</td></tr></table>
+</small>
+
+
+#### Interprétation
+
+Le coefficient de corrélation prend ses valeurs entre -1 et 1...
+
+```{r plotcorr_echelle, echo=FALSE,fig.width=6,fig.height=12}
+set.seed(0)
+grid.arrange(draw_corr(20,   1,5,  0)$p1,
+             draw_corr(20,   1,5,  0)$p2,
+             draw_corr(20,   1,5, 15)$p1,
+             draw_corr(20,   1,5, 15)$p2,
+             draw_corr(20,   1,5,100)$p1,
+             draw_corr(20,   1,5,100)$p2,
+             draw_corr(20,   0,5, 10)$p1,
+             draw_corr(20,   0,5, 10)$p2,
+             draw_corr(20,  -1,5,100)$p1,
+             draw_corr(20,  -1,5,100)$p2,
+             draw_corr(20,  -1,5, 15)$p1,
+             draw_corr(20,  -1,5, 15)$p2,
+             draw_corr(20,  -1,5,  0)$p1,
+             draw_corr(20,  -1,5,  0)$p2,
+             nrow=7,
+             ncol=2)
+
+```
+
+#### Calcul avec R
+
+Pour calculer un coefficient de corrélation avec R, on utilise (tout simplement) la fonction `cor()`:
+
+```{r calc_cor}
+cor(broceliande$age,broceliande$hauteur)
+cor(broceliande$hauteur,broceliande$largeur)
+```
+
+## Lien entre une variable catégorielle et une variable quantitative
+
+### Description graphique {#boxplot}
+
+Le type de graphique sans doute le plus souvent employé pour montrer la relation entre une variable catégorielle et une variable quantitative est la **boîte à moustaches** ou **boxplot**.
+
+Intéressons-nous par exemple au lien entre `enchantement` et `perlimpinpin` dans le jeu de données `brocéliande`:
+
+```{r boxplot_ench_perl, fig.width=5, fig.height=3}
+ggplot(broceliande, aes(x=enchantement, y=perlimpinpin))+
+  geom_boxplot(fill="lightblue")
+```
+
+Si la variable quantitative est à **valeurs discrètes** et/ou a une **très lourde queue de distribution**, alors il peut arriver que représenter la distribution par une boîte à moustaches soit peu pertinent. Par exemple, représenter la relation entre `espece` et `lutins` ne semble pas être une très bonne idée (et une transformation des données n'y changerait rien...):
+
+```{r boxplot_espece_lutins, fig.width=5, fig.height=3}
+ggplot(broceliande, aes(x=espece, y=lutins))+
+  geom_boxplot(col="orange")
+```
+
+```{r histo_espece_lutins, fig.width=5, fig.height=5}
+ggplot(broceliande,aes(x=lutins))+
+  geom_histogram(fill="orange",bins=10)+
+  facet_grid(espece~.)+
+  scale_y_sqrt()
+```
+
+
+### Description par une métrique
+
+Pour décrire le lien entre une variable catégorielle et une variable quantitative, on peut calculer certaines **caractéristiques de la variable quantitative** (par exemple sa moyenne) **par groupe** (défini par les modalités de la variable catégorielle). Pour cela, la fonction `summarise()` du package `dplyr` est tout indiquée:
+
+```{r descr_metrique}
+broceliande %>% 
+  group_by(espece) %>% 
+  summarise(moy_largeur=mean(largeur),
+            max_largeur=max(largeur),
+            min_largeur=min(largeur),
+            sd_largeur=sd(largeur))
+
+```
+
+<div class="exo">
+Considérez le jeu de données `potions` et calculez les coefficients de corrélation entre
+
+- `p_conjuration` et `p_destruction`
+- `p_alteration` et `p_destruction`
+
+Au vu de ces résultats (et sans prendre en compte tous les paramètres complexes qui président à l'élaboration d'une potion magique), semble-t-il a priori plus facile de concevoir une potion qui *fasse apparaître* un dragon cracheur de feu (conjuration + destruction) ou une potion qui *vous transforme* en dragon cracheur de feu (alteration + destruction) ?
+</div>
+
+
+## Lien entre deux variables catégorielles {#desconti}
+
+
+<table>
+<col width="150">
+<col width="300">
+<tr>
+<td><img src="img/trone.png" width="150"></td>
+<td>
+On reprend ici le jeu de données `chateauxEtBoulots` et on va s'intéresser ici, plus particulièrement, au lien entre l'activité des personnages et leur sexe.
+</td>
+</tr>
+</table>
+
+### Description graphique
+
+On peut produire des **barplots** qui dépendent d'une des variables en x, et de l'autre par la couleur de remplissage par exemple.
+
+
+```{r chateauxEtBoulots_barplot_1, fig.width=5,fig.height=2.5}
+ggplot(chateauxEtBoulots,aes(x=activite))+
+  geom_bar(aes(fill=sexe))
+```
+
+Plusieurs positionnements pour les modalités du facteur sont possibles. Le postionnement "fill" permet une meilleure visualisation des proportions de *sexe* dans chaque modalité de *activite*.
+
+```{r chateauxEtBoulots_barplot_2, fig.width=5,fig.height=2.5}
+ggplot(chateauxEtBoulots,aes(x=activite))+
+  geom_bar(aes(fill=sexe),position="fill")
+```
+
+### Tableau de contingences {#tableaucontingences}
+
+L'établissement d'un lien entre deux variables catégorielles passe en premier lieu par le calcul du **tableau de contingences** qui donne les **effectifs observés** pour toutes les associations possibles de modalités.
+
+```{r chateauxEtBoulots_contingence}
+table(chateauxEtBoulots$activite,chateauxEtBoulots$sexe)
+```
+
+La lecture de ce tableau suggère que la chevalerie est associée aux hommes (pas une seule "chevalière" dans notre jeu de données), tandis que la magie semble plutôt associée aux femmes (plus de fées et sorcières que d'enchanteurs et de mages noirs). Princes et princesses semblent en revanche être autant représentés les uns que les autres.
+
+L'usage du package `janitor` permet une petite mise en forme de cette table:
+
+```{r montre_janitor_formatting}
+library(janitor)
+chateauxEtBoulots %>% 
+  tabyl(activite,sexe) %>% 
+  adorn_totals("row") %>%                  # Rajoute la ligne "Total"
+  adorn_totals("col") %>%                  # Rajoute la colonne "Total"
+  adorn_percentages(denominator="all") %>% # Transforme les effectifs en pourcentages
+  adorn_pct_formatting(digits=1)           # Limite le nombre de digits affichés 
+  
+```
+
+<div class="exo">
+
+Considérez le tableau `chateauxEtBoulots` et les variables `tenue` et `region`. La couleur rose semble particulièrement peu en vogue dans une des trois régions de Fantaisie. Laquelle est-ce? 
+
+```{r, echo=FALSE, results=FALSE}
+chateauxEtBoulots %>% 
+  tabyl(region, tenue) %>% 
+  adorn_totals("row") %>% 
+  adorn_totals("col") %>% 
+  adorn_percentages(denominator="row") %>% 
+  adorn_pct_formatting(digits=1)
+```
+
+</div>
+
+
+

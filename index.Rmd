@@ -1,0 +1,13 @@
+--- 
+title: "Contes et stats R"
+author: "Lise Vaudor"
+date: "`r Sys.Date()`"
+site: bookdown::bookdown_site
+documentclass: book
+biblio-style: apalike
+link-citations: yes
+description: "Mon grimoire de stats avec R"
+output: 
+  bookdown::html_book:
+      theme: minty
+---

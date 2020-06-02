@@ -1,0 +1,630 @@
+# Modéliser le lien entre deux variables
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(gridExtra)
+library(purrr)
+library(magrittr)
+library(gganimate)
+library(infer)
+source("scripts/utils.R")
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
+
+chateauxEtBoulots=read.table("datasets/chateauxEtBoulots.csv",header=TRUE,sep=";")
+broceliande=read.csv("datasets/broceliande.csv",sep=";", header=T)
+potions=read.csv("datasets/potions.csv",sep=";", header=T)
+```
+
+
+Maintenant que nous avons abordé la logique "générale" du test d'hypothèse, intéressons-nous plus particulièrement à deux **modèles** (ceux de la **régression linéaire** et de l'**ANOVA** -ou analyse de variance-). 
+
+Un **modèle** est un **outil** qui peut être utile pour **simplifier une problématique** et **formaliser une question**. Dans le cas des modèles statistiques que nous allons aborder dans ce chapitre, la formalisation de cette question permet d'appliquer et interpréter un **test d'hypothèse** selon la même logique que celle expliquée auparavant dans la section \@ref(testshyp).
+
+
+<div class="encadre">
+Un modèle décrivant une variable $Y$ en fonction d'une autre variable $X$ s'accompagne typiquement des questions suivantes:
+
+- En termes d'**effet**: quel est l'effet de $X$ sur $Y$ ?
+- En termes de **significativité**: Est-ce que l'effet observé de $X$ sur $Y$ est significatif, ou au contraire pourrait-il simplement s'expliquer par le hasard d'échantillonnage? C'est à cette question que le test d'hypothèse est censé apporter une réponse.
+- En termes de **prédiction** et de **qualité d'ajustement**: Serait-on en mesure de prédire la valeur de $Y$, connaissant celle de $X$, avec précision? $Y$ est-elle "étroitement" liée à $X$ ou juste "vaguement"?). Autrement dit, la **variabilité résiduelle** des observations par rapport au modèle proposé est-elle forte?
+</div>
+
+
+Réaliser une **régression linéaire** ou une **ANOVA** va nous permettre de répondre à ces questions, en nous fournissant notamment les éléments de réponse suivants:
+
+<div class="encadre">
+- l'**effet** (*signe* de l'effet et *taille* d'effet), indicateur du sens et de l'ampleur de l'influence de la variable explicative sur la variable réponse. Dans notre exemple, $Y$ augmente quand $X$ augmente: l'effet de $X$ sur $Y$ est positif
+- la **p-value**, indicatrice de la **significativité** de l'effet
+- le **R$^2$**, ou coefficient de détermination, indicateur de la **qualité prédictive** et de la **qualité d'ajustement** du modèle
+</div>
+
+
+## La régression linéaire: lien entre deux variables quantitatives
+
+### Modèle
+
+<div class="encadre">
+Un **modèle de régression linéaire** peut être écrit comme suit:
+
+$$Y=\alpha X+\beta+E(0,\sigma^2)$$
+
+où
+
+- $\alpha$ correspond à la **pente** de régression (ici $\approx$ 2)
+- $\beta$ correspond à l'**ordonnée** à l'origine (ici $\approx$ 20)
+- $E(0,\sigma^2)$ correspond à une erreur dont on considèrera (pour le moment) qu'elle suit une loi normale de moyenne nulle et de variance $\sigma^2$ Cette erreur rend compte des écarts entre les points et le modèle (la droite) (ici $\sigma\approx$ 10, c'est-à-dire que 95% de écarts sont dans l'intervalle $\approx$[-20,20]).
+</div>
+
+Ce modèle est un **modèle linéaire** car la variable $Y$ s'écrit comme une "combinaison linéaire" de la variable $X$.
+
+```{r expli_regression, echo=FALSE, fig.width=5, fig.height=3}
+n=20
+a=2
+b=20
+sigma=10
+df=tibble(x=runif(n,-20,30))%>% 
+      mutate(y=a*x+b+rnorm(n,0,sigma))
+ggplot(df,aes(x=x,y=y))+
+  geom_point()+
+  geom_smooth(method="lm",se=FALSE, col="red")
+```
+
+### La régression linéaire, en théorie
+
+```{r expli_regression_SC, echo=FALSE}
+draw_reg=function(n,a,b,sigma){
+   df=tibble(x=runif(n,0,100))%>% 
+      mutate(y=a*x+b+rnorm(n,0,sigma))
+   s=df %>% summarise(my=mean(y),
+                      mx=mean(x))
+   reg=lm(df$y~df$x)
+   R2=round(summary(reg)$r.squared,2)
+   col1="red"
+   col2="yellow"
+   df=df %>% 
+      mutate(yfit=lm(y~x,data=df)$fitted.values) %>%
+      mutate(SCTymax=case_when(y>s$my~y,y<s$my~s$my),
+             SCTymin=case_when(y<s$my~y,y>s$my~s$my),
+             SCRymax=case_when(yfit>y~yfit,yfit<y~y),
+             SCRymin=case_when(yfit<y~yfit,yfit>y~y))
+   p0=ggplot(df,aes(x=x,y=y))+
+      geom_point()
+   p1=p0+
+      geom_smooth(method="lm", col=col1, se=FALSE)
+   p2=p1+
+     geom_errorbar(aes(ymin=SCRymin,ymax=SCRymax),col=col1,alpha=0.3,size=1)
+   p3=p0+
+     geom_hline(yintercept=mean(df$y), col=col2)+
+     geom_errorbar(aes(ymin=SCTymin,ymax=SCTymax),col=col2,alpha=0.5,size=1)
+   p4=p3+
+     geom_smooth(method="lm", col=col1, se=FALSE)+
+     geom_errorbar(aes(ymin=SCRymin,ymax=SCRymax),col=col1,alpha=0.3,size=1)
+   return(list(p0=p0,p1=p1,p2=p2,p3=p3,p4=p4, R2=R2))
+}
+truc=draw_reg(20,3,10,30)
+```
+
+#### Ajustement
+
+<table><col width="400"><col width="800">
+<tr>
+<td>
+```{r expli_XY_1, fig.width=4,fig.height=3,echo=FALSE}
+truc$p0
+```
+</td>
+<td>On considère deux variables quantitatives $X$ et $Y$</td>
+</tr>
+<tr>
+<td>
+```{r expli_XY_2, fig.width=4,fig.height=3,echo=FALSE}
+truc$p2
+```
+</td>
+<td>La droite de régression est celle qui minimise la **somme des carrés des résidus** (SCR): les résidus sont les écarts (en rouge) entre les points et la droite de régression</td>
+
+</tr>
+</table>
+
+
+
+
+#### R2
+
+<small>
+<table><col width="400"><col width="800">
+<tr>
+<td>
+```{r expli_R2_reg1, fig.width=4,fig.height=3,echo=FALSE}
+truc$p2
+```
+
+```{r expli_R2_reg2, fig.width=4,fig.height=3,echo=FALSE}
+truc$p3
+```
+</td>
+<td>le $R^2$ correspond à la **part de variabilité de $Y$ qui est expliquée par le modèle**.
+
+<div class="encadre">
+$$R^2=\frac{SCT-SCR}{SCT}=1-\frac{SCR}{SCT}$$
+où
+
+- **SCR est la somme des carrés des résidus**, c'est à dire la somme des distances des points au modèle (ici représentées en rouge) au carré
+- **SCT est la somme des carrés totale** i.e. la somme des distances à la moyenne de Y (ici représentées en jaune), au carré
+
+</div>
+
+Le $R^2$ varie entre 0 et 1.
+
+Ici, il vaut `r truc$R2`.
+</td>
+
+</tr>
+</table>
+</small>
+
+```{r illustration_R2_reg, echo=FALSE, fig.width=6, fig.height=8}
+params=list(n=   c(20, 20,20,20,20),
+            a=   c( 0,0.2, 1, 1, 1),
+            b=   c( 5,  5, 5, 5, 5),
+            sigma=c(3, 10,20, 5, 1))
+p=pmap(params,draw_reg)
+f=function(p){
+  p$p4+ggtitle(bquote(R^2==.(p$R2)))
+}
+p=p %>% map(f)
+p$nrow=5
+do.call(grid.arrange,p)
+```
+
+Plus le $R^2$ est proche de 1, plus la part de variabilité de $Y$ expliquée par le modèle (donc, ici, expliquée par $X$) est importante.
+
+Le $R^2$ constitue une mesure de la **qualité prédictive** d'un modèle: à partir d'une valeur de $X$, est-on capable de prédire la valeur de $Y$ sans trop se tromper? Si le $R^2$ est proche de 1, alors vraisemblablement, c'est le cas...
+
+#### Test(s) associé au modèle
+
+Les tests d'hypothèse associés à un modèle de régression portent sur la valeur des coefficients (notamment valeur de la **pente $\alpha$**).
+
+On s'intéresse ainsi à:
+ 
+- l'hypothèse $\alpha=0$, qui si elle est vérifiée correspond à une situation où $X$ n'a **pas d'effet** sur $Y$
+- plus rarement (parce que la valeur de $Y$ pour $X=0$ a rarement d'intérêt), on peut s'intéresser à l'hypothèse $\beta=0$
+
+
+Le test de Student réalisé dans le cadre d'une régression linéaire correspond ainsi à un test d'une **hypothèse nulle** du type H$_0=$\{le paramètre estimé est nul\}. 
+
+Une **p-value faible** (conventionnellement, inférieure à 5\%) entraîne un **rejet de l'hypothèse nulle**, auquel cas on conclut que $X$ **a un effet significatif** sur $Y$. 
+
+
+Exemples de relations entre deux variables X et Y (toutes deux quantitatives). On a fait varier ici 3 éléments: la **taille d'effet**, la **variabilité résiduelle**, et la **taille d'échantillon**.
+
+```{r expli_facteur_regression, echo=FALSE, fig.height=8, fig.width=8}
+layout(matrix(1:8, nrow=4))
+par(mar=c(4,4,1,1), oma=c(1,5,5,1))
+taille_effet=c(1,5)
+variance_residuelle=c(1,10)
+taille_echantillon=c(6,60)
+for (i in 1:2){
+  for (j in 1:2){
+    for (k in 1:2){
+      n=taille_echantillon[k]
+      alpha=taille_effet[j]
+      sigma=variance_residuelle[i]
+      x=runif(n,0,20)
+      y=alpha*x+rnorm(n,0,sigma)
+      plot(x,y, ylim=c(-15,115),xlim=c(0,20))
+      abline(h=seq(from=-20,to=120,by=20), lty=2, col="grey") 
+    }
+  }
+}
+mtext(c("variabilité résiduelle"),
+            at=c(0.55), side=3, outer=T, line=2)
+mtext(c("faible","forte"),
+            at=c(0.3,0.8), side=3, outer=T, line=0)
+mtext(c("taille d'effet"),
+            at=c(0.5), side=2, outer=T, line=2)
+mtext(c("|-----------------forte------------------|","|----------------faible--------------|"),
+            at=c(0.25,0.8), side=2, outer=T, line=0)
+```
+
+
+### La régression linéaire, en pratique
+
+Considérons le jeu de données `brocéliande` et intéressons-nous au lien entre `hauteur` et `perlimpinpin`:
+
+```{r broceliande_age_perlimpinpin, fig.width=5, fig.height=3,echo=TRUE}
+ggplot(broceliande, aes(x=hauteur, y=perlimpinpin))+
+  geom_point(col="lightblue")+
+  geom_smooth(method="lm")
+```
+
+Ici on a un **nombre de données important** ET une allure des résidus qui se rapproche des **conditions d'application du test d'hypothèse** (normalité, homoscedasticité). 
+
+Pour réaliser le modèle de régression linéaire, on utilise la fonction `lm()` (comme **l**inear **m**odel). Les variables hauteur et perlimpinpin correspondant à des vecteurs numériques, le type de modèle linéaire ajusté est une **régression linéaire**.
+
+```{r lm_reg_simple}
+mylm=lm(perlimpinpin~hauteur, data=broceliande)
+mylm
+```
+
+L'affichage de l'objet `mylm` montre notamment les valeurs estimées de $\alpha$ et $\beta$:
+
+$\hat\alpha$= `r mylm$coeff[2]`
+
+$\hat\beta$= `r mylm$coeff[1]`
+
+Pour voir d'autres éléments (comme les **résultats des tests d'hypothèse** et le $R^2$) on peut utiliser la fonction `summary()`
+
+```{r lm_reg_simple_summary}
+mysummary=summary(lm(perlimpinpin~hauteur, data=broceliande))
+mysummary
+```
+
+Les éléments renvoyés par summary(reg) correspondent bien à 
+
+- l'**évaluation de l'effet** (estimation du paramètre $\alpha$),
+- la **significativité de l'effet** (p-value) évaluée à travers un test de Student,
+- la **qualité d'ajustement** décrite par le R$^2$.
+
+Dans notre cas, on a:
+
+- une valeur de pente estimée à `r round(mylm$coeff[2],3)`, c'est-à-dire que la hauteur de l'arbre a un **léger effet positif** sur la quantité de perlimpinpin qu'on y trouve
+- un **effet significatif** au seuil de 5\% (p-value=`r round(summary(mylm)$coeff[2,4],3)`, c'est-à-dire que l'effet positif observé n'est pas simplement lié à l'aléa d'échantillonnage mais est bien le reflet d'un effet réel
+- un R$^2$ de `r round(summary(mylm)$r.squared,3)`, c'est-à-dire que **la qualité d'ajustement est très faible** (on ne peut pas prédire précisément la quantité de poudre de perlimpinpin dans un arbre en se basant sur sa hauteur)
+
+Pour récupérer chacun de ces éléments, on peut procéder comme suit:
+
+```{r lm_reg_simple_elem}
+mylm$coeff # estimation des paramètres
+mylm$coeff[2] # estimation du paramètre de pente
+summary(mylm)$coeff[2,4] # p-value associée à l'hypothèse pente=0
+summary(mylm)$r.squared # valeur du R2
+```
+
+<div class="exo">
+Considérez le jeu de données `potions` et examinez la relation entre 
+
+- la variable `i_givreboises` et la variable `p_invisibilite`.
+- la variable `i_ectoplasme` et la variable `p_invisibilite`
+- la variable `i_larmes_crocodile` et la variable `p_invisibilite`
+
+Dans chacun de ces cas, que pouvez-vous dire sur 
+- le signe et la taille de l'effet?
+- la significativité de l'effet?
+- la performance de prédiction?
+
+</div>
+
+
+## L'ANOVA: lien entre une variable catégorielle et une variable quantitative
+
+### Modèle
+
+<div class="encadre">
+Un **modèle d'ANOVA à 1 facteur** (facteur $X$ à $J$ modalités $m_1$, $m_2$, ...., $m_J$) peut être écrit comme suit:
+
+$$
+Y=\nu_1I_{X=m_1}+ \nu_2I_{X=m_2}+...+ \nu_JI_{X=m_J}+E(0,\sigma^2)
+$$
+où
+
+- $I_{X=m_i}$ est la variable indicatrice de l'événement $X=m_i$ (cette variable vaut 1 dans le cas où 
+$X=m_i$, 0 autrement)
+- $\nu_i$ correspond à la valeur attendue pour $Y$ pour $X=m_i$ 
+- $E(0,\sigma^2)$ correspond à une erreur dont on considèrera (pour le moment) qu'elle suit une loi normale de moyenne nulle et de variance $\sigma^2$ Cette erreur rend compte des écarts entre les points et le modèle (la droite) (ici $\sigma\approx$ 10, c'est-à-dire que 95% de écarts sont dans l'intervalle $\approx$[-20,20]).
+</div>
+
+```{r expli_anova, echo=FALSE, fig.width=5, fig.height=3}
+n=20
+a=30
+b=26
+c=32
+sigma=10
+df=tibble(x=factor(c(rep("A",n),
+                     rep("B",n),
+                     rep("C",n))),
+             m=c(rep(a,n),
+                 rep(b,n),
+                 rep(c,n))) %>%  
+      mutate(y=rnorm(3*n,0,sigma))
+dfsum=df %>%
+  group_by(x) %>% 
+  summarise(y=mean(y))
+
+ggplot(df,aes(x=x,y=y))+
+  geom_boxplot(fill="grey")+
+  geom_point(data=dfsum, col="red")
+```
+
+Là où le t-test permettait de tester des différences de moyennes **entre deux groupes seulement**, l'ANOVA permet de considérer un **nombre de groupes J>2**. 
+
+### L'ANOVA, en théorie
+
+```{r expli_anova_SC, echo=FALSE}
+draw_aov=function(n,mu,a,b,c,sigma){
+   df=tibble(x=factor(
+                 c(rep("A",n),
+                   rep("B",n),
+                   rep("C",n))),
+             m=c(rep(a,n),
+                 rep(b,n),
+                 rep(c,n)),
+             xg=c(rep(1,n),
+                  rep(2,n),
+                  rep(3,n))) %>% 
+      ungroup() %>% 
+      mutate(y=mu+m+rnorm(3*n,0,sigma),
+             xg=xg+seq(-0.4,0.4,length.out=n))
+   s=df %>% 
+     group_by(x) %>% 
+     summarise(my=mean(y))
+   s=bind_rows(s,s) %>% 
+     mutate(mx=c(1:3-0.4,1:3+0.4))
+   
+   df=left_join(df,s,by="x")
+   aov=lm(df$y~df$x)
+   R2=round(summary(aov)$r.squared,2)
+   col1="red"
+   col2="yellow"
+   df=df %>% 
+      mutate(yfit=lm(y~x,data=df)$fitted.values) %>%
+      mutate(SCTymax=case_when(y>mean(df$y)~y,
+                               y<mean(df$y)~mean(df$y)),
+             SCTymin=case_when(y<mean(df$y)~y,
+                               y>mean(df$y)~mean(df$y)),
+             SCRymax=case_when(yfit>y~yfit,yfit<y~y),
+             SCRymin=case_when(yfit<y~yfit,yfit>y~y))
+   p0=ggplot(df,aes(x=xg,y=y))+
+      geom_point()
+   p1=p0+
+      geom_line(data=s, aes(x=mx,y=my,group=x), col=col1)
+   p2=p1+
+     geom_linerange(aes(ymin=SCRymin,ymax=SCRymax),col=col1,alpha=0.3,size=1)
+   p3=p0+
+     geom_hline(yintercept=mean(df$y), col=col2)+
+     geom_linerange(aes(ymin=SCTymin,ymax=SCTymax),col=col2,alpha=0.5,size=1)
+   p4=p3+
+     geom_line(data=s, aes(x=mx,y=my,group=x), col=col1)+
+     geom_linerange(aes(x=xg,ymin=SCRymin,ymax=SCRymax),col=col1,alpha=0.3,size=1)
+   return(list(p0=p0,p1=p1,p2=p2,p3=p3,p4=p4, R2=R2))
+}
+truc=draw_aov(20,120,10,18,22,5)
+```
+
+
+#### Ajustement
+
+<table><col width="400"><col width="800">
+<tr>
+<td>
+```{r expli_XY_aov1, fig.width=4,fig.height=3,echo=FALSE}
+truc$p1
+```
+</td>
+<td>On considère deux variables: $X$ (catégorielle) et $Y$ (quantitative)</td>
+</tr>
+<tr>
+<td>
+```{r expli_XY_aov2, fig.width=4,fig.height=3,echo=FALSE}
+truc$p2
+```
+</td>
+<td>Le modèle est celui qui minimise la **somme des carrés des résidus** (SCR): les résidus sont les écarts (en rouge) entre les points et le modèle</td>
+
+</tr>
+</table>
+
+
+
+#### R2
+
+<small>
+<table><col width="400"><col width="800">
+<tr>
+<td>
+```{r expli_R2_aov1, fig.width=4,fig.height=3,echo=FALSE}
+truc$p2
+```
+
+```{r expli_R2_aov2, fig.width=4,fig.height=3,echo=FALSE}
+truc$p3
+```
+</td>
+<td>le $R^2$ correspond à la **part de variabilité de $Y$ qui est expliquée par le modèle**.
+
+<div class="encadre">
+$$R^2=\frac{SCT-SCR}{SCT}=1-\frac{SCR}{SCT}$$
+où
+
+- **SCR est la somme des carrés des résidus**, c'est à dire la somme des distances des points au modèle (ici représentées en rouge) au carré
+- **SCT est la somme des carrés totale** i.e. la somme des distances à la moyenne de Y (ici représentées en jaune), au carré
+
+</div>
+
+Le $R^2$ varie entre 0 et 1.
+
+Ici, il vaut `r truc$R2`.
+</td>
+
+</tr>
+</table>
+</small>
+
+```{r illustration_R2_aov, echo=FALSE, fig.width=6, fig.height=8}
+params=list(n=    rep(20,5),
+            mu=   rep(120,5),
+            a=    c(20,20,20,20,20),
+            b=    c(35,35,50,50,50),
+            c=    c(32,32,40,40,40),
+            sigma=c(15,10,12,7,2))
+p=pmap(params,draw_aov)
+f=function(p){
+  p$p4+ggtitle(bquote(R^2==.(p$R2)))+
+    scale_y_continuous(limits=c(100,200))
+}
+p=p %>% map(f)
+p$nrow=5
+do.call(grid.arrange,p)
+```
+
+Plus le $R^2$ est proche de 1, plus la part de variabilité de $Y$ expliquée par le modèle (donc, ici, expliquée par $X$) est importante.
+
+Le $R^2$ constitue une mesure de la **qualité prédictive** d'un modèle: à partir d'une valeur de $X$, est-on capable de prédire la valeur de $Y$ sans trop se tromper? Si le $R^2$ est proche de 1, alors vraisemblablement, c'est le cas...
+
+#### Test associé à une ANOVA
+
+Le test associé à une ANOVA est un **test de Fisher** (ou test F).
+
+Le test F permet de répondre à la question "la variable $X$ a-t-elle un effet sur $Y$?"
+
+<div class="encadre">
+
+Soit l'hypothèse H$_0$, selon laquelle "la variable $X$ n'a pas d'effet sur $Y$". Sous cette hypothèse Y est distribué autour d'une valeur moyenne **globale**.
+
+Soit la statistique F:
+
+$$
+\frac{\left(\frac{SC_0-SC_1}{ddl_0-ddl_1}\right)}{\left(\frac{SC_1}{ddl_1}\right)} 
+$$
+
+où 
+
+- SC$_0$=somme des carrés des écarts au modèle 0 = SCT
+- SC$_1$=somme des carrés des écarts au modèle 1 = SCR
+- ddl$_0$=nombre de degrés de liberté du modèle 0 
+- ddl$_1$=nombre de degrés de liberté du modèle 1
+
+Supposons que l'hypothèse H$_0$ est vraie.
+
+Dans ce cas, $F$ suit une distribution F avec (ddl$_0$-ddl$_1$, ddl$_0$) degrés de liberté, et on peut calculer la probabilité d'observer la valeur obtenue pour la statistique F (i.e. la p-value). 
+</div>
+
+Si cette **p-value est faible**, cela signifie que ce qu'on observe est peu vraisemblable sous l'hypothèse que l'on a faite au départ, l'on **rejette donc cette hypothèse**.
+
+
+Exemples de relations entre les variables X (qualitative) et Y (quantitative). On a fait varier ici 3 éléments: la **taille d'effet**, la **variabilité résiduelle**, et la **taille d'échantillon**.
+
+```{r expli_facteur_anova, echo=FALSE, fig.height=8, fig.width=8}
+layout(matrix(1:8, nrow=4))
+par(mar=c(4,4,1,1), oma=c(1,5,5,1))
+taille_effet=c(5,30)
+variance_residuelle=c(5,20)
+taille_echantillon=c(6,60)
+for (i in 1:2){
+  for (j in 1:2){
+    for (k in 1:2){
+      n=taille_echantillon[k]
+      alpha=taille_effet[j]
+      sigma=variance_residuelle[i]
+      x=c(rep("A",n/2),rep("B",n/2))
+      y1=10+rnorm(n/2,0,sigma)
+      y2=10+alpha+rnorm(n/2,0,sigma)
+      y=c(y1,y2)
+      boxplot(y~x, ylim=c(-35,120), range=0)
+      mymax=tapply(y,x,"max")
+      mymoy=tapply(y,x,"mean")
+      text(c(1,2),mymax+20,c(paste("n=",n/2),paste("n=",n/2)))
+      abline(h=seq(from=-20,to=120,by=20), lty=2, col="grey") 
+      points(c(1,2), mymoy, col="red", lwd=2)
+    }
+  }
+}
+mtext(c("variabilité résiduelle"),
+            at=c(0.55), side=3, outer=T, line=2)
+mtext(c("faible","forte"),
+            at=c(0.3,0.8), side=3, outer=T, line=0)
+mtext(c("taille d'effet"),
+            at=c(0.5), side=2, outer=T, line=2)
+mtext(c("|-----------------forte------------------|","|----------------faible--------------|"),
+            at=c(0.25,0.8), side=2, outer=T, line=0)
+```
+
+
+
+
+### L'ANOVA, en pratique
+
+On s'intéresse par exemple aux données de la table `broceliande`, et on analyse l'influence de $X$=`espece` sur $Y$=`perlimpinpin`. On cherche ainsi à identifier s'il existe des différences de moyenne de $Y$ en fonction des groupes définis par $X$.
+
+#### Représentation et ajustement du modèle
+
+```{r graphic_anova_esp_perl, fig.width=5, fig.height=3}
+broc_esp_perl_resume=broceliande %>% 
+  group_by(espece) %>% 
+  summarise(moy_perlimpinpin=mean(perlimpinpin))
+ggplot(broceliande, aes(x=espece, y=perlimpinpin))+
+         geom_boxplot(col="lightblue")+
+  geom_point(data=broc_esp_perl_resume, aes(y=moy_perlimpinpin), col="blue")
+```
+
+Pour réaliser une ANOVA, on va commencer par **ajuster un modèle linéaire** (comme dans le cas d'une régression linéaire).
+
+```{r lm_esp_perl, echo=TRUE}
+mylm_rel=lm(perlimpinpin~espece, data=broceliande)
+mylm_rel
+mylm_abs=lm(perlimpinpin~espece+0, data=broceliande)
+mylm_abs
+```
+
+Examinez la différence entre les deux modèles: en utilisant la première formule les moyennes sont évaluées relativement à un **niveau de référence** (en l'occurence, le premier): les éléments renvoyés par lm1 répondent donc à la question "les moyennes par groupe sont-elles significativement différentes de celle du premier groupe?". Dans le deuxième cas, les moyennes par groupe sont évaluées de manière absolue. C'est plutôt dans cette deuxième conception qu'on se place ici (car les chataigniers ne constituent pas une sorte de groupe "témoin"):
+
+```{r lm_esp_perl_summary, echo=TRUE}
+summary(mylm_abs)
+```
+
+Ici, l'affichage de `summary(mylm_abs)` montre les paramètres du modèle et les tests d'hypothèse associés. Ils correspondent ici à des tests de Student qui vérifient si les valeurs attendues par groupes sont différentes de la valeur pour le groupe de référence (dans le premier cas, mylm_rel) ou des tests qui vérifient si les valeurs attendues par groupe sont différentes de 0 (dans le premier cas, mylm_abs). Dans un cas comme dans l'autre, ce n'est pas typiquement ce qu'on cherche à faire pour comprendre s'il existe bel et bien un effet de $X$ sur $Y$...
+
+#### Tests d'hypothèse
+
+
+Classiquement, on va plutôt se poser les questions suivantes: 
+
+- "le facteur (dans son ensemble) a-t-il un effet sur la réponse?"
+- "les moyennes par groupe sont-elles significativement différentes deux à deux?" (i.e. dans ce cas on ne considère pas qu'il y a un seul groupe de référence)
+
+
+Pour répondre à la première question, on peut appeler la fonction "anova" (appliquée à un objet de type "modèle linéaire") ou la fonction "aov" (remarquez que les deux lignes de commande suivantes renvoient exactement les mêmes résultats):
+
+```{r broceliande_anova_aov,eval=FALSE, echo=TRUE}
+anova(lm(perlimpinpin~espece, data=broceliande))
+summary(aov(perlimpinpin~espece, data=broceliande))
+```
+
+```{r}
+anova(lm(perlimpinpin~espece, data=broceliande))
+```
+
+Pour répondre à la deuxième question, on peut appeler la fonction "TukeyHSD" (appliquée à un objet de type "aov"):
+
+```{r tukeyhsd, echo=TRUE}
+diff_2_a_2=TukeyHSD(aov(perlimpinpin~espece, data=broceliande))
+diff_2_a_2
+plot(diff_2_a_2)
+```
+
+La première ligne de commande ci-dessus renvoie la p-value associée au **test de Tukey HSD** (HSD pour "Honestly Significant Difference"). 
+
+L'hypothèse testée, **pour 2 catégories**, est **"La différence de moyenne entre les deux catégories est nulle"**. Ainsi, la commande plot(diff\_2\_a\_2) affiche une **estimation de la différence de moyenne entre deux groupes**, ainsi qu'une estimation d'un **intervalle de confiance à 95\% pour cette différence**.
+
+Comme pour un t-test, une p-value proche de zéro nous amène à rejeter l'hypothèse selon laquelle il n'y a pas d'effet (i.e. l'hypothèse selon laquelle il n'y a pas de différence de moyenne significative entre les groupes).
+
+
+
+<div class="exo">
+Considérez le jeu de données `potions` et examinez la relation entre la variable `m_preparation` et la variable `p_destruction`: est-ce que le mode de préparation de la potion semble lié à ses propriétés destructrices?...
+
+Que pouvez-vous dire sur 
+
+- le signe et la taille de l'effet?
+- la significativité de l'effet?
+- la performance de prédiction?
+
+</div>
+
+#### Et au fait, elles sont vérifiées les hypothèses du modèle linéaire?
+
+C'est bien le moment de se poser la question, me direz-vous...
+
+Eh bien, en l'occurence, oui, c'est bien le moment de se poser la question. En effet, ces hypothèses sont que les résidus du modèle sont distribuées de manière gaussienne, et qu'ils sont homoscédastiques. Or, les résidus "n'existent pas" tant qu'on a pas défini et calculé les paramètres du modèle... Il faut donc ajuster le modèle (moyennant quelques lignes de code) avant de se demander s'il est valide... 
+
+Examinons donc les résidus du modèle. Globalement, si les résidus sont, grosso modo, gaussiens, l'hypothèse d'homoscédasticité en revanche n'est pas respectée. Néanmoins, compte tenu du nombre de points de mesure, et de la grandeur d'effet de l'espece sur la concentration en poudre de perlimpinpin (qui apparaît clairement sur le graphe), un modèle linéaire peut, a priori, être utilisé sans trop d'inquiétudes... 
